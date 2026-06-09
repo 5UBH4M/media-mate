@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_16kb/return_code.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 

@@ -8,8 +8,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_16kb/return_code.dart';
 
 class StatusSaverScreen extends StatefulWidget {
   const StatusSaverScreen({super.key});
