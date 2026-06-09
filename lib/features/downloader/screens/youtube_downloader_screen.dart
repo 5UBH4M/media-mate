@@ -9,6 +9,7 @@ import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_16kb/return_code.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../services/notification_service.dart';
 
 class YoutubeDownloaderScreen extends StatefulWidget {
   const YoutubeDownloaderScreen({super.key});
@@ -20,6 +21,8 @@ class YoutubeDownloaderScreen extends StatefulWidget {
 class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
   final TextEditingController _urlController = TextEditingController();
   final YoutubeExplode _yt = YoutubeExplode();
+  final NotificationService _notificationService = NotificationService();
+  static const int _downloadNotificationId = 1001;
 
   bool _fetching = false;
   Video? _videoInfo;
@@ -126,12 +129,23 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
         ));
       }
 
-      // 3. Audio only option
+      // 3. Audio Only — MP3 (converted via FFmpeg from the best available audio stream)
+      availableOptions.add(StreamOption(
+        qualityLabel: 'Audio Only (MP3)',
+        format: 'mp3',
+        description: 'Converted to MP3 via FFmpeg for maximum compatibility.',
+        audioStreamInfo: bestAudio,
+        isMuxRequired: false,
+        isMp3Conversion: true,
+        sizeBytes: bestAudio.size.totalBytes,
+      ));
+
+      // 4. Audio Only — Raw format (no conversion, fastest)
       final audioContainerFormat = bestAudio.container.name;
       availableOptions.add(StreamOption(
         qualityLabel: 'Audio Only (${audioContainerFormat.toUpperCase()})',
         format: audioContainerFormat,
-        description: 'Highest quality audio stream.',
+        description: 'Original audio stream, no conversion needed.',
         audioStreamInfo: bestAudio,
         isMuxRequired: false,
         sizeBytes: bestAudio.size.totalBytes,
@@ -175,6 +189,14 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
       _isCancelled = false;
       _isBackgrounded = false;
     });
+ 
+    // Show initial download notification
+    await _notificationService.showDownloadProgress(
+      id: _downloadNotificationId,
+      title: 'Downloading: ${_videoInfo!.title}',
+      body: 'Starting download...',
+      progress: 0,
+    );
  
     String? tempVideoPath;
     String? tempAudioPath;
@@ -256,22 +278,60 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
           finalOutPath = null;
  
           _showSuccess('Successfully saved Full HD video to Gallery under "Media Mate" album.');
+          await _notificationService.showDownloadComplete(
+            id: _downloadNotificationId,
+            title: 'Download Complete',
+            body: '${_videoInfo!.title} saved to Gallery.',
+          );
         } else {
           final logs = await session.getLogsAsString();
           debugPrint('FFmpeg failure: $logs');
           throw Exception('FFmpeg muxing failed.');
         }
       } else if (opt.videoStreamInfo == null) {
-        // Audio Only download (directly download the stream without FFmpeg conversion)
+        // Audio Only download
+        final rawExt = opt.audioStreamInfo!.container.name;
+        final tempRawPath = '${tempDir.path}/temp_audio_raw_${DateTime.now().millisecondsSinceEpoch}.$rawExt';
         finalOutPath = '${tempDir.path}/temp_audio_${DateTime.now().millisecondsSinceEpoch}.$format';
  
         setState(() => _statusText = 'Downloading audio stream (0%)...');
-        await _downloadStreamToFile(opt.audioStreamInfo!, finalOutPath, (progress) {
+        await _downloadStreamToFile(opt.audioStreamInfo!, tempRawPath, (progress) {
           setState(() {
-            _downloadProgress = progress * 0.95;
+            _downloadProgress = progress * (opt.isMp3Conversion ? 0.70 : 0.95);
             _statusText = 'Downloading audio stream (${(progress * 100).toInt()}%)...';
           });
         });
+ 
+        if (_isCancelled) {
+          if (await File(tempRawPath).exists()) await File(tempRawPath).delete();
+          throw Exception('Download cancelled by user.');
+        }
+ 
+        // If MP3 conversion is requested, transcode via FFmpeg
+        if (opt.isMp3Conversion) {
+          setState(() {
+            _downloadProgress = 0.75;
+            _statusText = 'Converting to MP3 (FFmpeg)...';
+          });
+ 
+          final cmd = '-i "$tempRawPath" -codec:a libmp3lame -qscale:a 2 -y "$finalOutPath"';
+          final session = await FFmpegKit.execute(cmd);
+          final returnCode = await session.getReturnCode();
+ 
+          // Clean up raw download
+          if (await File(tempRawPath).exists()) await File(tempRawPath).delete();
+ 
+          if (!ReturnCode.isSuccess(returnCode)) {
+            final logs = await session.getLogsAsString();
+            debugPrint('FFmpeg MP3 conversion failed: $logs');
+            throw Exception('FFmpeg MP3 conversion failed.');
+          }
+        } else {
+          // No conversion needed — raw file IS the final output
+          if (tempRawPath != finalOutPath) {
+            await File(tempRawPath).rename(finalOutPath);
+          }
+        }
  
         if (_isCancelled) {
           if (await File(finalOutPath).exists()) await File(finalOutPath).delete();
@@ -311,6 +371,11 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
  
         if (saved) {
           _showSuccess('Saved audio file successfully to: "Downloads/Media Mate/Video Downloader/$finalFileName"');
+          await _notificationService.showDownloadComplete(
+            id: _downloadNotificationId,
+            title: 'Download Complete',
+            body: '$finalFileName saved to Downloads.',
+          );
         } else {
           // Fallback to share sheet
           final appDocDir = await getApplicationDocumentsDirectory();
@@ -327,6 +392,11 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
           await Share.shareXFiles([XFile(destPath)], text: 'Audio downloaded from YouTube');
           
           _showSuccess('Saved audio to app storage and opened share options to save or send the file.');
+          await _notificationService.showDownloadComplete(
+            id: _downloadNotificationId,
+            title: 'Download Complete',
+            body: '${_videoInfo!.title} audio saved.',
+          );
         }
       } else {
         // Direct video download (muxed)
@@ -358,6 +428,11 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
         finalOutPath = null;
  
         _showSuccess('Successfully saved video to Gallery under "Media Mate" album.');
+        await _notificationService.showDownloadComplete(
+          id: _downloadNotificationId,
+          title: 'Download Complete',
+          body: '${_videoInfo!.title} saved to Gallery.',
+        );
       }
     } catch (e) {
       // Clean up any temp files if cancelled or failed
@@ -375,12 +450,19 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
 
       debugPrint('Download error: $e');
       if (_isCancelled) {
+        await _notificationService.cancel(_downloadNotificationId);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Download cancelled.'),
           backgroundColor: Colors.orangeAccent,
         ));
       } else {
+        // Show failure notification
+        await _notificationService.showDownloadFailed(
+          id: _downloadNotificationId,
+          title: 'Download Failed',
+          body: 'Failed to download: ${_videoInfo?.title ?? 'media'}',
+        );
         _showError('Failed to complete download. Error: $e');
       }
     } finally {
@@ -626,7 +708,7 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
                         child: ListTile(
                           onTap: () => setState(() => _selectedOption = opt),
                           leading: Icon(
-                            opt.format == 'mp3' ? Icons.audiotrack : Icons.video_collection,
+                            opt.videoStreamInfo == null ? Icons.audiotrack : Icons.video_collection,
                             color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
                           ),
                           title: Text(
@@ -822,6 +904,7 @@ class StreamOption {
   final StreamInfo? videoStreamInfo;
   final AudioOnlyStreamInfo? audioStreamInfo;
   final bool isMuxRequired;
+  final bool isMp3Conversion;
   final int sizeBytes;
 
   StreamOption({
@@ -831,6 +914,7 @@ class StreamOption {
     this.videoStreamInfo,
     this.audioStreamInfo,
     required this.isMuxRequired,
+    this.isMp3Conversion = false,
     required this.sizeBytes,
   });
 }

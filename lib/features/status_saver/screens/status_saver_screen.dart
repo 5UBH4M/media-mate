@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_16kb/return_code.dart';
 
@@ -55,12 +56,24 @@ class _StatusSaverScreenState extends State<StatusSaverScreen> with SingleTicker
     }
 
     if (Platform.isAndroid) {
-      // Proactively request storage permission on older Android devices (pre-13),
-      // but do not block if it returns denied (especially on Android 13+ / 16 where it is deprecated/fails).
+      // Request the correct permissions based on Android SDK version.
+      // Android 13+ (API 33+) uses granular media permissions.
+      // Android 12 and below uses the legacy storage permission.
       try {
-        await Permission.storage.request();
+        final androidInfo = await DeviceInfoPlugin().androidInfo;
+        final sdkInt = androidInfo.version.sdkInt;
+
+        if (sdkInt >= 30) {
+          // Android 11+ — request manage external storage for hidden directory access
+          final status = await Permission.manageExternalStorage.request();
+          debugPrint('Manage external storage permission status: $status');
+        } else {
+          // Android 10 and below — request legacy storage permission
+          final status = await Permission.storage.request();
+          debugPrint('Legacy storage permission status: $status');
+        }
       } catch (e) {
-        debugPrint('Storage permission request error: $e');
+        debugPrint('Permission request error: $e');
       }
     }
 
@@ -183,14 +196,14 @@ class _StatusSaverScreenState extends State<StatusSaverScreen> with SingleTicker
         await Gal.putImage(filePath, album: 'Media Mate');
       }
 
-      Navigator.pop(context); // Pop loader
+      if (mounted) Navigator.pop(context); // Pop loader
       _showSuccess(
         item.isVideo
             ? 'Video saved to Gallery under "Media Mate" album.'
             : 'Image saved to Gallery under "Media Mate" album.'
       );
     } catch (e) {
-      Navigator.pop(context); // Pop loader
+      if (mounted) Navigator.pop(context); // Pop loader
       debugPrint('Save status error: $e');
       _showError('Failed to save status. Error: $e');
     } finally {
@@ -310,9 +323,17 @@ class _StatusSaverScreenState extends State<StatusSaverScreen> with SingleTicker
                         ),
                         const SizedBox(height: 24),
                         FilledButton.icon(
+                          onPressed: () async {
+                            await openAppSettings();
+                          },
+                          icon: const Icon(Icons.settings),
+                          label: const Text('Open Settings'),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
                           onPressed: _loadStatuses,
-                          icon: const Icon(Icons.check_circle_outline),
-                          label: const Text('Grant Permission'),
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
                         ),
                       ],
                     ),
@@ -480,7 +501,7 @@ class _StatusPreviewScreenState extends State<StatusPreviewScreen> {
   void _initVideo() {
     _videoController = widget.item.isLocal
         ? VideoPlayerController.file(File(widget.item.path))
-        : VideoPlayerController.network(widget.item.path);
+        : VideoPlayerController.networkUrl(Uri.parse(widget.item.path));
 
     _videoController!.initialize().then((_) {
       if (mounted) {

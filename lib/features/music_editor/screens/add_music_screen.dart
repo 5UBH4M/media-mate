@@ -248,7 +248,7 @@ class _AddMusicScreenState extends State<AddMusicScreen> with SingleTickerProvid
       // 1. Force scale dimensions to be divisible by 2 to prevent libx264 crashes on odd image sizes
       // 2. Loop image frame and combine with audio
       final cmd = '-loop 1 -i "${_selectedImage!.path}" -i "$finalAudioPath" '
-          '-vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -t ${_durationSeconds.toInt()} '
+          '-vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v mpeg4 -q:v 2 -t ${_durationSeconds.toInt()} '
           '-pix_fmt yuv420p -c:a aac -b:a 192k -shortest -y "$outputPath"';
 
       final session = await FFmpegKit.execute(cmd);
