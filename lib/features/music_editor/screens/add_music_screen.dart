@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -36,27 +35,6 @@ class _AddMusicScreenState extends State<AddMusicScreen> with SingleTickerProvid
   String _exportStatus = '';
 
   late AnimationController _visualizerController;
-
-  // Royalty-free loop presets (direct stable mp3 links)
-  final List<MusicPreset> _presets = [
-    MusicPreset(
-      name: 'Chill Lofi Loop',
-      artist: 'Media Mate Beats',
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', // Streamable loop
-    ),
-    MusicPreset(
-      name: 'Acoustic Folk Jam',
-      artist: 'Guitar Acoustic',
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    ),
-    MusicPreset(
-      name: 'Ambient Piano Breeze',
-      artist: 'Melancholic Piano',
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-    ),
-  ];
-
-  MusicPreset? _activePreset;
 
   @override
   void initState() {
@@ -113,7 +91,6 @@ class _AddMusicScreenState extends State<AddMusicScreen> with SingleTickerProvid
           _selectedAudioPath = result.files.single.path;
           _selectedAudioName = result.files.single.name;
           _isOnlineAudio = false;
-          _activePreset = null;
         });
 
         // Set player source and play it
@@ -125,18 +102,6 @@ class _AddMusicScreenState extends State<AddMusicScreen> with SingleTickerProvid
     }
   }
 
-  Future<void> _selectPreset(MusicPreset preset) async {
-    await _audioPlayer.stop();
-    setState(() {
-      _activePreset = preset;
-      _selectedAudioPath = preset.url;
-      _selectedAudioName = preset.name;
-      _isOnlineAudio = true;
-    });
-
-    await _audioPlayer.setSourceUrl(preset.url);
-    await _audioPlayer.play(UrlSource(preset.url));
-  }
 
   void _loadAudioFromLink() {
     final controller = TextEditingController();
@@ -204,11 +169,6 @@ class _AddMusicScreenState extends State<AddMusicScreen> with SingleTickerProvid
       _selectedAudioPath = url;
       _isOnlineAudio = true;
       _selectedAudioName = fileName;
-      _activePreset = MusicPreset(
-        name: fileName,
-        artist: 'Internet Link',
-        url: url,
-      );
     });
       
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -514,49 +474,6 @@ class _AddMusicScreenState extends State<AddMusicScreen> with SingleTickerProvid
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-
-                    // Sound Presets Label
-                    Text(
-                      'Or Choose Online Presets:'.tr(lang),
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Music presets list
-                    ListView.separated(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: _presets.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final preset = _presets[index];
-                        final isSelected = _activePreset == preset;
-
-                        return Card(
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            side: BorderSide(
-                              color: isSelected ? theme.colorScheme.primary : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
-                            ),
-                          ),
-                          color: isSelected ? theme.colorScheme.primaryContainer.withValues(alpha: 0.15) : theme.colorScheme.surface,
-                          child: ListTile(
-                            onTap: () => _selectPreset(preset),
-                            leading: Icon(
-                              Icons.music_video_rounded,
-                              color: isSelected ? theme.colorScheme.primary : theme.colorScheme.outline,
-                            ),
-                            title: Text(preset.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                            subtitle: Text(preset.artist, style: const TextStyle(fontSize: 12)),
-                            trailing: isSelected
-                                ? Icon(Icons.check_circle_rounded, color: theme.colorScheme.primary)
-                                : const Icon(Icons.arrow_forward_ios, size: 14),
-                          ),
-                        );
-                      },
-                    ),
                     const SizedBox(height: 28),
 
                     // 3. Export settings card
@@ -660,16 +577,4 @@ class _AddMusicScreenState extends State<AddMusicScreen> with SingleTickerProvid
       },
     );
   }
-}
-
-class MusicPreset {
-  final String name;
-  final String artist;
-  final String url;
-
-  MusicPreset({
-    required this.name,
-    required this.artist,
-    required this.url,
-  });
 }

@@ -55,18 +55,12 @@ class _StatusSaverScreenState extends State<StatusSaverScreen> with SingleTicker
     }
 
     if (Platform.isAndroid) {
-      var status = await Permission.storage.status;
-      if (!status.isGranted) {
-        status = await Permission.storage.request();
-      }
-      if (!status.isGranted) {
-        // WhatsApp Statuses can be in Android/media folder where sometimes manageExternalStorage is helpful,
-        // but let's first check if we can check storage status. If denied, show permission denied screen.
-        setState(() {
-          _permissionDenied = true;
-          _loading = false;
-        });
-        return;
+      // Proactively request storage permission on older Android devices (pre-13),
+      // but do not block if it returns denied (especially on Android 13+ / 16 where it is deprecated/fails).
+      try {
+        await Permission.storage.request();
+      } catch (e) {
+        debugPrint('Storage permission request error: $e');
       }
     }
 
@@ -80,22 +74,36 @@ class _StatusSaverScreenState extends State<StatusSaverScreen> with SingleTicker
 
       List<File> imageFiles = [];
       List<File> videoFiles = [];
+      bool successfullyReadAny = false;
+      bool hasPermissionError = false;
 
       for (final p in searchPaths) {
         final dir = Directory(p);
         if (await dir.exists()) {
-          final List<FileSystemEntity> entities = dir.listSync();
-          for (final entity in entities) {
-            if (entity is File) {
-              final path = entity.path.toLowerCase();
-              if (path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.png')) {
-                imageFiles.add(entity);
-              } else if (path.endsWith('.mp4') || path.endsWith('.gif')) {
-                videoFiles.add(entity);
+          try {
+            final List<FileSystemEntity> entities = dir.listSync();
+            successfullyReadAny = true;
+            for (final entity in entities) {
+              if (entity is File) {
+                final path = entity.path.toLowerCase();
+                if (path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.png')) {
+                  imageFiles.add(entity);
+                } else if (path.endsWith('.mp4') || path.endsWith('.gif')) {
+                  videoFiles.add(entity);
+                }
               }
             }
+          } catch (e) {
+            debugPrint('Failed to list WhatsApp statuses directory $p: $e');
+            hasPermissionError = true;
           }
         }
+      }
+
+      if (!successfullyReadAny && hasPermissionError) {
+        setState(() {
+          _permissionDenied = true;
+        });
       }
 
       setState(() {
@@ -128,14 +136,16 @@ class _StatusSaverScreenState extends State<StatusSaverScreen> with SingleTicker
     String? tempFilePath;
 
     try {
-      // Request gallery access
-      final hasAccess = await Gal.hasAccess(toAlbum: true);
-      if (!hasAccess) {
-        final granted = await Gal.requestAccess(toAlbum: true);
-        if (!granted) {
-          Navigator.pop(context); // Pop loader
-          _showError('Gallery permission is required to save statuses.');
-          return;
+      // Request gallery access (iOS only, Android uses MediaStore with no runtime permissions required)
+      if (Platform.isIOS) {
+        final hasAccess = await Gal.hasAccess(toAlbum: true);
+        if (!hasAccess) {
+          final granted = await Gal.requestAccess(toAlbum: true);
+          if (!granted) {
+            Navigator.pop(context); // Pop loader
+            _showError('Gallery permission is required to save statuses.');
+            return;
+          }
         }
       }
 

@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme.dart';
+
 import '../../../services/project_service.dart';
 import '../../collage_editor/models/collage_project.dart';
 import '../../collage_editor/state/collage_editor_state.dart';

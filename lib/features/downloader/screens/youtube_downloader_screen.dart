@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -24,7 +23,6 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
 
   bool _fetching = false;
   Video? _videoInfo;
-  StreamManifest? _streamManifest;
   List<StreamOption> _options = [];
   StreamOption? _selectedOption;
 
@@ -61,7 +59,6 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
     setState(() {
       _fetching = true;
       _videoInfo = null;
-      _streamManifest = null;
       _options = [];
       _selectedOption = null;
     });
@@ -100,7 +97,10 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
           ),
         );
       }
-      final bestAudio = manifest.audioOnly.withHighestBitrate();
+      final m4aAudioStreams = manifest.audioOnly.where((a) => a.container.name == 'm4a').toList();
+      final bestAudio = m4aAudioStreams.isNotEmpty
+          ? m4aAudioStreams.withHighestBitrate()
+          : manifest.audioOnly.withHighestBitrate();
 
       if (videoOnly1080 != null) {
         availableOptions.add(StreamOption(
@@ -127,9 +127,10 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
       }
 
       // 3. Audio only option
+      final audioContainerFormat = bestAudio.container.name;
       availableOptions.add(StreamOption(
-        qualityLabel: 'Audio Only (MP3)',
-        format: 'mp3',
+        qualityLabel: 'Audio Only (${audioContainerFormat.toUpperCase()})',
+        format: audioContainerFormat,
         description: 'Highest quality audio stream.',
         audioStreamInfo: bestAudio,
         isMuxRequired: false,
@@ -138,7 +139,6 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
 
       setState(() {
         _videoInfo = video;
-        _streamManifest = manifest;
         _options = availableOptions;
         if (availableOptions.isNotEmpty) {
           _selectedOption = availableOptions.first;
@@ -154,17 +154,20 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
 
   Future<void> _startDownload() async {
     if (_videoInfo == null || _selectedOption == null) return;
-
-    // Check gallery permissions
-    final hasAccess = await Gal.hasAccess(toAlbum: true);
-    if (!hasAccess) {
-      final granted = await Gal.requestAccess(toAlbum: true);
-      if (!granted) {
-        _showError('Gallery save permission denied. Cannot download video.');
-        return;
+ 
+    // Check gallery permissions only on iOS (on Android 13+, saving via MediaStore requires no permissions,
+    // and older permissions might fail or throw exceptions on Android 16)
+    if (Platform.isIOS) {
+      final hasAccess = await Gal.hasAccess(toAlbum: true);
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess(toAlbum: true);
+        if (!granted) {
+          _showError('Gallery save permission denied. Cannot download video.');
+          return;
+        }
       }
     }
-
+ 
     setState(() {
       _downloading = true;
       _downloadProgress = 0.0;
@@ -172,26 +175,26 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
       _isCancelled = false;
       _isBackgrounded = false;
     });
-
+ 
     String? tempVideoPath;
     String? tempAudioPath;
     String? finalOutPath;
-
+ 
     try {
       final opt = _selectedOption!;
       final sanitizedTitle = _videoInfo!.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final format = opt.format;
       final finalFileName = '${sanitizedTitle}_${DateTime.now().millisecondsSinceEpoch}.$format';
-
+ 
       final tempDir = await getTemporaryDirectory();
-
+ 
       if (opt.isMuxRequired) {
         // Muxing required (1080p)
         // Use completely safe names for FFmpeg input paths to prevent any parsing/quoting failures
         tempVideoPath = '${tempDir.path}/temp_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
         tempAudioPath = '${tempDir.path}/temp_audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
         finalOutPath = '${tempDir.path}/temp_muxed_${DateTime.now().millisecondsSinceEpoch}.mp4';
-
+ 
         // 1. Download Video Stream
         setState(() => _statusText = 'Downloading video stream (0%)...');
         await _downloadStreamToFile(opt.videoStreamInfo!, tempVideoPath, (progress) {
@@ -200,7 +203,7 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
             _statusText = 'Downloading video stream (${(progress * 100).toInt()}%)...';
           });
         });
-
+ 
         // 2. Download Audio Stream
         setState(() => _statusText = 'Downloading audio stream (0%)...');
         await _downloadStreamToFile(opt.audioStreamInfo!, tempAudioPath, (progress) {
@@ -209,19 +212,19 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
             _statusText = 'Downloading audio stream (${(progress * 100).toInt()}%)...';
           });
         });
-
+ 
         // 3. Mux Video + Audio using FFmpeg
         setState(() {
           _downloadProgress = 0.95;
           _statusText = 'Merging audio & video streams (FFmpeg)...';
         });
-
+ 
         if (_isCancelled) throw Exception('Download cancelled by user.');
-
+ 
         // Clean output if exists
         final outFile = File(finalOutPath);
         if (await outFile.exists()) await outFile.delete();
-
+ 
         // Determine if transcoding is required (if the stream container is not MP4 or codec is not AVC/H.264)
         final bool isH264 = opt.videoStreamInfo is VideoStreamInfo &&
             opt.videoStreamInfo!.container.name == 'mp4' &&
@@ -230,155 +233,131 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
         final String videoCodecArg = isH264 
             ? 'copy' 
             : 'libx264 -preset ultrafast -pix_fmt yuv420p';
-
+ 
         final cmd = '-i "$tempVideoPath" -i "$tempAudioPath" -c:v $videoCodecArg -c:a aac -map 0:v:0 -map 1:a:0 -y "$finalOutPath"';
         final session = await FFmpegKit.execute(cmd);
         final returnCode = await session.getReturnCode();
-
+ 
         // Delete temporary parts
         if (await File(tempVideoPath).exists()) await File(tempVideoPath).delete();
         if (await File(tempAudioPath).exists()) await File(tempAudioPath).delete();
         tempVideoPath = null;
         tempAudioPath = null;
-
+ 
         if (_isCancelled) {
           if (await File(finalOutPath).exists()) await File(finalOutPath).delete();
           throw Exception('Download cancelled by user.');
         }
-
+ 
         if (ReturnCode.isSuccess(returnCode)) {
           // Save final output to gallery under album "Media Mate"
           await Gal.putVideo(finalOutPath, album: 'Media Mate');
           await File(finalOutPath).delete();
           finalOutPath = null;
-
+ 
           _showSuccess('Successfully saved Full HD video to Gallery under "Media Mate" album.');
         } else {
           final logs = await session.getLogsAsString();
           debugPrint('FFmpeg failure: $logs');
           throw Exception('FFmpeg muxing failed.');
         }
-      } else {
-        // Direct stream download or Audio Only
-        if (opt.format == 'mp3') {
-          // Download audio to a temp file first and then convert to MP3
-          tempAudioPath = '${tempDir.path}/temp_audio_${DateTime.now().millisecondsSinceEpoch}.${opt.audioStreamInfo!.container.name}';
-          finalOutPath = '${tempDir.path}/temp_converted_${DateTime.now().millisecondsSinceEpoch}.mp3';
-
-          setState(() => _statusText = 'Downloading audio stream (0%)...');
-          await _downloadStreamToFile(opt.audioStreamInfo!, tempAudioPath, (progress) {
-            setState(() {
-              _downloadProgress = progress * 0.5;
-              _statusText = 'Downloading audio stream (${(progress * 100).toInt()}%)...';
-            });
-          });
-
+      } else if (opt.videoStreamInfo == null) {
+        // Audio Only download (directly download the stream without FFmpeg conversion)
+        finalOutPath = '${tempDir.path}/temp_audio_${DateTime.now().millisecondsSinceEpoch}.$format';
+ 
+        setState(() => _statusText = 'Downloading audio stream (0%)...');
+        await _downloadStreamToFile(opt.audioStreamInfo!, finalOutPath, (progress) {
           setState(() {
-            _downloadProgress = 0.8;
-            _statusText = 'Converting to MP3 format (FFmpeg)...';
+            _downloadProgress = progress * 0.95;
+            _statusText = 'Downloading audio stream (${(progress * 100).toInt()}%)...';
           });
-
-          if (_isCancelled) throw Exception('Download cancelled by user.');
-
-          // Clean output if exists
-          final outFile = File(finalOutPath);
-          if (await outFile.exists()) await outFile.delete();
-
-          // Convert to MP3 using FFmpeg
-          final cmd = '-i "$tempAudioPath" -c:a libmp3lame -q:a 2 -y "$finalOutPath"';
-          final session = await FFmpegKit.execute(cmd);
-          final returnCode = await session.getReturnCode();
-
-          if (await File(tempAudioPath).exists()) {
-            await File(tempAudioPath).delete();
-          }
-          tempAudioPath = null;
-
-          if (_isCancelled) {
-            if (await File(finalOutPath).exists()) await File(finalOutPath).delete();
-            throw Exception('Download cancelled by user.');
-          }
-
-          if (!ReturnCode.isSuccess(returnCode)) {
-            throw Exception('FFmpeg audio conversion failed.');
-          }
-
-          // Attempt to save to downloads or fallback to share sheet
-          bool saved = false;
-          String destPath = '';
-          try {
-            Directory? downloadsDir;
-            if (Platform.isAndroid) {
-              downloadsDir = Directory('/storage/emulated/0/Download');
-            } else {
-              downloadsDir = await getDownloadsDirectory();
-            }
-
-            downloadsDir ??= await getApplicationDocumentsDirectory();
-            final mediaMateDir = Directory('${downloadsDir.path}/Media Mate/Video Downloader');
-            if (!await mediaMateDir.exists()) {
-              await mediaMateDir.create(recursive: true);
-            }
-
-            destPath = '${mediaMateDir.path}/$finalFileName';
-            await File(finalOutPath).copy(destPath);
-            await File(finalOutPath).delete();
-            finalOutPath = null;
-            saved = true;
-          } catch (e) {
-            debugPrint('Failed to save directly to downloads directory: $e');
-          }
-
-          if (saved) {
-            _showSuccess('Saved audio file successfully to: "Downloads/Media Mate/Video Downloader/$finalFileName"');
+        });
+ 
+        if (_isCancelled) {
+          if (await File(finalOutPath).exists()) await File(finalOutPath).delete();
+          throw Exception('Download cancelled by user.');
+        }
+ 
+        setState(() {
+          _downloadProgress = 0.98;
+          _statusText = 'Saving audio file...';
+        });
+ 
+        // Attempt to save to downloads or fallback to share sheet
+        bool saved = false;
+        String destPath = '';
+        try {
+          Directory? downloadsDir;
+          if (Platform.isAndroid) {
+            downloadsDir = Directory('/storage/emulated/0/Download');
           } else {
-            // Fallback to share sheet
-            final appDocDir = await getApplicationDocumentsDirectory();
-            final destDir = Directory('${appDocDir.path}/Media Mate/Audio');
-            if (!await destDir.exists()) {
-              await destDir.create(recursive: true);
-            }
-            destPath = '${destDir.path}/$finalFileName';
-            await File(finalOutPath!).copy(destPath);
-            await File(finalOutPath!).delete();
-            finalOutPath = null;
-
-            // Show share sheet so user can save or send the audio
-            await Share.shareXFiles([XFile(destPath)], text: 'Audio downloaded from YouTube');
-            
-            _showSuccess('Saved audio to app storage and opened share options to save or send the file.');
+            downloadsDir = await getDownloadsDirectory();
           }
-        } else {
-          // Direct video download (muxed)
-          finalOutPath = '${tempDir.path}/temp_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
-          final streamInfo = opt.videoStreamInfo!;
-
-          setState(() => _statusText = 'Downloading media (0%)...');
-          await _downloadStreamToFile(streamInfo, finalOutPath, (progress) {
-            setState(() {
-              _downloadProgress = progress * 0.95;
-              _statusText = 'Downloading media (${(progress * 100).toInt()}%)...';
-            });
-          });
-
-          // Save to Gallery
-          setState(() {
-            _downloadProgress = 0.98;
-            _statusText = 'Registering file in Gallery...';
-          });
-
-          if (_isCancelled) {
-            if (await File(finalOutPath).exists()) await File(finalOutPath).delete();
-            throw Exception('Download cancelled by user.');
+ 
+          downloadsDir ??= await getApplicationDocumentsDirectory();
+          final mediaMateDir = Directory('${downloadsDir.path}/Media Mate/Video Downloader');
+          if (!await mediaMateDir.exists()) {
+            await mediaMateDir.create(recursive: true);
           }
-
-          // Video saving via Gal
-          await Gal.putVideo(finalOutPath, album: 'Media Mate');
+ 
+          destPath = '${mediaMateDir.path}/$finalFileName';
+          await File(finalOutPath).copy(destPath);
           await File(finalOutPath).delete();
           finalOutPath = null;
-
-          _showSuccess('Successfully saved video to Gallery under "Media Mate" album.');
+          saved = true;
+        } catch (e) {
+          debugPrint('Failed to save directly to downloads directory: $e');
         }
+ 
+        if (saved) {
+          _showSuccess('Saved audio file successfully to: "Downloads/Media Mate/Video Downloader/$finalFileName"');
+        } else {
+          // Fallback to share sheet
+          final appDocDir = await getApplicationDocumentsDirectory();
+          final destDir = Directory('${appDocDir.path}/Media Mate/Audio');
+          if (!await destDir.exists()) {
+            await destDir.create(recursive: true);
+          }
+          destPath = '${destDir.path}/$finalFileName';
+          await File(finalOutPath!).copy(destPath);
+          await File(finalOutPath).delete();
+          finalOutPath = null;
+ 
+          // Show share sheet so user can save or send the audio
+          await Share.shareXFiles([XFile(destPath)], text: 'Audio downloaded from YouTube');
+          
+          _showSuccess('Saved audio to app storage and opened share options to save or send the file.');
+        }
+      } else {
+        // Direct video download (muxed)
+        finalOutPath = '${tempDir.path}/temp_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
+        final streamInfo = opt.videoStreamInfo!;
+ 
+        setState(() => _statusText = 'Downloading media (0%)...');
+        await _downloadStreamToFile(streamInfo, finalOutPath, (progress) {
+          setState(() {
+            _downloadProgress = progress * 0.95;
+            _statusText = 'Downloading media (${(progress * 100).toInt()}%)...';
+          });
+        });
+ 
+        // Save to Gallery
+        setState(() {
+          _downloadProgress = 0.98;
+          _statusText = 'Registering file in Gallery...';
+        });
+ 
+        if (_isCancelled) {
+          if (await File(finalOutPath).exists()) await File(finalOutPath).delete();
+          throw Exception('Download cancelled by user.');
+        }
+ 
+        // Video saving via Gal
+        await Gal.putVideo(finalOutPath, album: 'Media Mate');
+        await File(finalOutPath).delete();
+        finalOutPath = null;
+ 
+        _showSuccess('Successfully saved video to Gallery under "Media Mate" album.');
       }
     } catch (e) {
       // Clean up any temp files if cancelled or failed
@@ -396,6 +375,7 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
 
       debugPrint('Download error: $e');
       if (_isCancelled) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Download cancelled.'),
           backgroundColor: Colors.orangeAccent,
@@ -440,6 +420,7 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
   }
 
   void _showError(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
       backgroundColor: Colors.redAccent,
@@ -447,6 +428,7 @@ class _YoutubeDownloaderScreenState extends State<YoutubeDownloaderScreen> {
   }
 
   void _showSuccess(String msg) {
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

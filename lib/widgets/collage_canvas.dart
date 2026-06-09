@@ -106,7 +106,6 @@ class _CollageCanvasState extends ConsumerState<CollageCanvas> {
         );
         break;
       case BackgroundType.solid:
-      default:
         backgroundWidget = Container(
           width: width,
           height: height,

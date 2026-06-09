@@ -31,13 +31,15 @@ class ExportService {
 
     try {
       if (Platform.isAndroid || Platform.isIOS) {
-        // Request gallery access with album permission
-        final hasAccess = await Gal.hasAccess(toAlbum: true);
-        if (!hasAccess) {
-          final granted = await Gal.requestAccess(toAlbum: true);
-          if (!granted) {
-            debugPrint('Gallery access permission denied');
-            return null;
+        // Request gallery access with album permission (iOS only)
+        if (Platform.isIOS) {
+          final hasAccess = await Gal.hasAccess(toAlbum: true);
+          if (!hasAccess) {
+            final granted = await Gal.requestAccess(toAlbum: true);
+            if (!granted) {
+              debugPrint('Gallery access permission denied');
+              return null;
+            }
           }
         }
 
@@ -95,7 +97,7 @@ class ExportService {
       await file.writeAsBytes(bytes);
 
       final xFile = XFile(filePath, mimeType: format == 'png' ? 'image/png' : 'image/jpeg');
-      final result = await Share.shareXFiles([xFile], text: 'Created with Collage Studio');
+      final result = await Share.shareXFiles([xFile], text: 'Created with Media Mate');
       
       return result.status == ShareResultStatus.success;
     } catch (e) {

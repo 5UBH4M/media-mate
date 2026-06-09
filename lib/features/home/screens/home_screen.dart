@@ -65,33 +65,40 @@ class HomeScreen extends ConsumerWidget {
                     Row(
                       children: [
                         // Language Switcher Button
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5),
+                        TextButton.icon(
+                          onPressed: () {
+                            ref.read(languageProvider.notifier).toggleLanguage();
+                            final newLang = ref.read(languageProvider);
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  newLang == AppLanguage.hindi 
+                                      ? 'भाषा हिन्दी में बदली गई' 
+                                      : 'Language switched to English',
+                                ),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.translate, size: 18),
+                          label: Text(
+                            lang == AppLanguage.hindi ? 'English' : 'हिंदी',
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
                             ),
                           ),
-                          child: IconButton(
-                            icon: const Icon(Icons.translate),
-                            color: Theme.of(context).colorScheme.primary,
-                            onPressed: () {
-                              ref.read(languageProvider.notifier).toggleLanguage();
-                              final newLang = ref.read(languageProvider);
-                              ScaffoldMessenger.of(context).clearSnackBars();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    newLang == AppLanguage.hindi 
-                                        ? 'भाषा हिन्दी में बदली गई' 
-                                        : 'Language switched to English',
-                                  ),
-                                  duration: const Duration(seconds: 2),
-                                ),
-                              );
-                            },
-                            tooltip: 'Switch Language'.tr(lang),
+                          style: TextButton.styleFrom(
+                            backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
+                            foregroundColor: Theme.of(context).colorScheme.primary,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                              side: BorderSide(
+                                color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5),
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
