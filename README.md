@@ -4,6 +4,22 @@ Media Mate is an all-in-one media utility toolbox for Android, built with Flutte
 
 ---
 
+## 📸 Screenshots
+
+| Home | Downloader |
+|------|------------|
+| ![](screenshots/home.png) | ![](screenshots/downloader.png) |
+
+| Collage | Status Saver |
+|---------|-------------|
+| ![](screenshots/collage.png) | ![](screenshots/status_saver.png) |
+
+| Image to Video |
+|---------------|
+| ![](screenshots/image_to_video.png) |
+
+
+
 ## ✨ Features
 
 ### 🎨 1. Collage Creator
